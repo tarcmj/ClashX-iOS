@@ -1,0 +1,196 @@
+name: Build ClashX IPA
+
+on:
+  push:
+    branches: [ main, master ]
+    paths-ignore:
+      - 'README.md'
+      - '.gitignore'
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'Build type'
+        required: true
+        default: 'development'
+        type: choice
+        options:
+          - development
+          - release
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+  GO_VERSION: '1.22'
+  BUNDLE_IDENTIFIER: com.clashx.ios
+
+jobs:
+  build:
+    runs-on: macos-14  # macOS Sonoma with Xcode 15 / Apple Silicon
+    timeout-minutes: 60
+
+    steps:
+      # ---- Checkout Code ----
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # ---- Install Dependencies ----
+      - name: Install Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '15.4'
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Install gomobile
+        run: |
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          gomobile init
+
+      - name: Install xcpretty
+        run: gem install xcpretty || true
+
+      - name: Install XcodeGen
+        run: |
+          brew install xcodegen || true
+
+      - name: Generate Xcode Project
+        run: xcodegen generate
+
+      # ---- Build Clash Core Framework ----
+      - name: Build ClashCore.xcframework
+        run: |
+          cd ClashCoreBridge
+          go mod tidy
+          gomobile bind \
+            -target ios \
+            -iosversion 15.0 \
+            -o ../ClashCore/ClashCore.xcframework \
+            -ldflags "-s -w" \
+            ./
+
+      - name: Verify ClashCore framework
+        run: |
+          if [ -d "ClashCore/ClashCore.xcframework" ]; then
+            echo "ClashCore.xcframework built successfully"
+            find ClashCore/ClashCore.xcframework -type f | head -20
+          else
+            echo "Failed to build ClashCore.xcframework"
+            exit 1
+          fi
+
+      # ---- Build iOS App ----
+      - name: Build and Archive
+        run: |
+          xcodebuild archive \
+            -project ClashX.xcodeproj \
+            -scheme ClashX \
+            -configuration Release \
+            -archivePath build/ClashX.xcarchive \
+            -destination "generic/platform=iOS" \
+            -allowProvisioningUpdates \
+            DEVELOPMENT_TEAM="${{ secrets.APPLE_TEAM_ID }}" \
+            PRODUCT_BUNDLE_IDENTIFIER="${{ env.BUNDLE_IDENTIFIER }}" \
+            CODE_SIGN_STYLE="Manual" \
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            2>&1 | xcpretty || \
+          xcodebuild archive \
+            -project ClashX.xcodeproj \
+            -scheme ClashX \
+            -configuration Release \
+            -archivePath build/ClashX.xcarchive \
+            -destination "generic/platform=iOS" \
+            -allowProvisioningUpdates \
+            2>&1 | tee build.log
+
+      - name: Export IPA
+        run: |
+          # Create export options plist
+          cat > build/exportOptions.plist << EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>method</key>
+              <string>development</string>
+              <key>signingStyle</key>
+              <string>automatic</string>
+              <key>stripSwiftSymbols</key>
+              <true/>
+              <key>uploadSymbols</key>
+              <false/>
+          </dict>
+          </plist>
+          EOF
+
+          xcodebuild -exportArchive \
+            -archivePath build/ClashX.xcarchive \
+            -exportPath build/ipa \
+            -exportOptionsPlist build/exportOptions.plist \
+            -allowProvisioningUpdates \
+            2>&1 | xcpretty || true
+
+      # ---- Upload Artifacts ----
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: ClashX-iOS-${{ github.sha }}
+          path: build/ipa/ClashX.ipa
+          retention-days: 14
+
+      - name: Upload dSYM (for debugging)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ClashX-dSYM-${{ github.sha }}
+          path: build/ClashX.xcarchive/dSYMs/**/*
+          retention-days: 7
+
+      - name: Upload Build Log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          retention-days: 7
+
+      # ---- Summary ----
+      - name: Show Build Summary
+        run: |
+          echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f "build/ipa/ClashX.ipa" ]; then
+            IPA_SIZE=$(du -h "build/ipa/ClashX.ipa" | cut -f1)
+            SHA=$(shasum -a 256 "build/ipa/ClashX.ipa" | cut -d' ' -f1)
+            echo "✅ IPA built successfully" >> $GITHUB_STEP_SUMMARY
+            echo "- **Size**: $IPA_SIZE" >> $GITHUB_STEP_SUMMARY
+            echo "- **SHA256**: \`$SHA\`" >> $GITHUB_STEP_SUMMARY
+            echo "- **Artifact**: \`ClashX-iOS-${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ IPA build failed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # Optional: Create a release on tag
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download IPA artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ClashX-iOS-${{ github.sha }}
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: ClashX.ipa
+          generate_release_notes: true

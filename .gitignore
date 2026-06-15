@@ -1,0 +1,34 @@
+# Xcode
+*.xcworkspace
+xcuserdata/
+DerivedData/
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Build products
+build/
+ClashCore/ClashCore.xcframework/
+
+# CocoaPods
+Pods/
+
+# Swift Package Manager
+.packages/
+.build/
+
+# XcodeGen generated
+ClashX.xcodeproj/
+
+# macOS
+.DS_Store
+
+# IDE
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# Environment
+.env

@@ -1,0 +1,71 @@
+## XcodeGen project file for ClashX
+## Install XcodeGen: brew install xcodegen
+## Generate project: xcodegen generate
+
+name: ClashX
+options:
+  bundleIdPrefix: com.clashx
+  deploymentTarget:
+    iOS: "15.0"
+  xcodeVersion: "15.0"
+  generateEmptyDirectories: true
+  groupSortPosition: top
+  developmentLanguage: zh-Hans
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    SWIFT_OBJC_BRIDGING_HEADER: ""
+    ENABLE_USER_SCRIPT_SANDBOXING: "NO"
+
+targets:
+  ClashX:
+    type: application
+    platform: iOS
+    info:
+      path: Configuration/Info.plist
+    sources:
+      - path: ClashX
+        type: group
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.clashx.ios
+        INFOPLIST_FILE: Configuration/Info.plist
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ""
+        APP_GROUP_IDENTIFIER: group.com.clashx
+    entitlements:
+      path: Configuration/ClashX.entitlements
+    dependencies:
+      - target: ClashXTunnel
+      - framework: ClashCore/ClashCore.xcframework
+        embed: true
+        optional: true
+    preBuildScripts:
+      - name: "Build Clash Core"
+        script: |
+          if [ ! -d "ClashCore/ClashCore.xcframework" ]; then
+            echo "warning: ClashCore.xcframework not found. Run scripts/build_clash_core.sh first."
+          fi
+        basedOnDependencyAnalysis: false
+
+  ClashXTunnel:
+    type: app-extension
+    platform: iOS
+    info:
+      path: Configuration/Info.plist
+    sources:
+      - path: ClashXTunnel
+        type: group
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.clashx.ios.tunnel
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ""
+        APP_GROUP_IDENTIFIER: group.com.clashx
+    entitlements:
+      path: Configuration/ClashXTunnel.entitlements
+    dependencies:
+      - framework: ClashCore/ClashCore.xcframework
+        embed: false
+        optional: true
