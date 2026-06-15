@@ -70,6 +70,7 @@ jobs:
       - name: Build ClashCore.xcframework
         run: |
           cd ClashCoreBridge
+          go get golang.org/x/mobile@latest
           go mod tidy
           gomobile bind \
             -target ios \
