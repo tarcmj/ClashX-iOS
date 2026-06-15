@@ -69,7 +69,7 @@ jobs:
           xcodegen --version
 
       - name: Generate Xcode Project
-        run: xcodegen generate --generate-xcscheme
+        run: xcodegen generate
 
       # ---- Build Clash Core Framework ----
       - name: Build ClashCore.xcframework
