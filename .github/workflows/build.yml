@@ -95,49 +95,43 @@ jobs:
           fi
 
       # ---- Build iOS App ----
-      - name: Build and Archive
+      - name: Build App
         run: |
           mkdir -p build
-          xcodebuild archive \
+
+          # Build without signing (AltStore will sign on install)
+          xcodebuild build \
             -project ClashX.xcodeproj \
             -scheme ClashX \
             -configuration Release \
-            -archivePath build/ClashX.xcarchive \
-            -destination "generic/platform=iOS" \
-            -allowProvisioningUpdates \
-            CODE_SIGN_STYLE=Automatic \
-            DEVELOPMENT_TEAM="${{ secrets.APPLE_TEAM_ID }}" \
-            PRODUCT_BUNDLE_IDENTIFIER=com.clashx.ios
+            -sdk iphoneos \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO
 
-      - name: Export IPA
+      - name: Package IPA
         run: |
-          # Ensure build directory exists
-          mkdir -p build
+          mkdir -p build/ipa
 
-          # Create export options plist
-          cat > build/exportOptions.plist << EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>method</key>
-              <string>development</string>
-              <key>signingStyle</key>
-              <string>automatic</string>
-              <key>stripSwiftSymbols</key>
-              <true/>
-              <key>uploadSymbols</key>
-              <false/>
-          </dict>
-          </plist>
-          EOF
+          # Locate the .app bundle
+          APP_PATH=$(find build/DerivedData -name "*.app" -type d | head -1)
+          if [ -z "$APP_PATH" ]; then
+            echo "Error: .app bundle not found"
+            exit 1
+          fi
 
-          xcodebuild -exportArchive \
-            -archivePath build/ClashX.xcarchive \
-            -exportPath build/ipa \
-            -exportOptionsPlist build/exportOptions.plist \
-            -allowProvisioningUpdates \
-            2>&1 | xcpretty || true
+          echo "Found app: $APP_PATH"
+
+          # Create Payload directory and copy .app
+          mkdir -p build/ipa/Payload
+          cp -R "$APP_PATH" build/ipa/Payload/
+
+          # Package into IPA (zip -> ipa)
+          cd build/ipa
+          zip -r ClashX.ipa Payload/ -q
+          cd ../..
+
+          echo "IPA created at: build/ipa/ClashX.ipa"
 
       # ---- Upload Artifacts ----
       - name: Upload IPA
