@@ -99,16 +99,16 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
         while true {
             // Read packets in batches
-            let packets = flow.readPackets()
-            if packets.packets.isEmpty {
+            let (packetData, protocolTypes) = await flow.readPackets()
+            if packetData.isEmpty {
                 // No packets available, wait a bit
                 try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
                 continue
             }
 
             // Process each packet
-            for (index, packet) in packets.packets.enumerated() {
-                let protocolType = packets.protocols[index]
+            for (index, packet) in packetData.enumerated() {
+                let protocolType = protocolTypes[index]
                 // Forward packet to Clash core for processing
                 _ = processPacket(packet, protocolType: protocolType)
             }
