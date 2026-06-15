@@ -54,7 +54,7 @@ targets:
     type: app-extension
     platform: iOS
     info:
-      path: Configuration/Info.plist
+      path: Configuration/TunnelInfo.plist
     sources:
       - path: ClashXTunnel
         type: group
