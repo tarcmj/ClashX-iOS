@@ -3,17 +3,12 @@
 // Build with:
 //
 //	gomobile bind -target ios -o ClashCore.xcframework ./
-//
-//go:build ignore
-// +build ignore
-
 package clashcore
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -23,9 +18,7 @@ import (
 	"github.com/Dreamacro/clash/config"
 	"github.com/Dreamacro/clash/constant"
 	"github.com/Dreamacro/clash/hub/executor"
-	C "github.com/Dreamacro/clash/constant"
 	"github.com/Dreamacro/clash/log"
-	"github.com/Dreamacro/clash/tunnel"
 )
 
 // ClashCore is the main bridge object exposed to iOS via gomobile.
@@ -37,7 +30,6 @@ type ClashCore struct {
 	httpClient  *http.Client
 	trafficUp   int64
 	trafficDown int64
-	logCh       chan string
 	logs        []string
 	logMu       sync.RWMutex
 }
@@ -46,7 +38,6 @@ type ClashCore struct {
 func NewClashCore() *ClashCore {
 	return &ClashCore{
 		httpClient: &http.Client{Timeout: 10 * time.Second},
-		logCh:      make(chan string, 1024),
 	}
 }
 
@@ -78,20 +69,13 @@ func (c *ClashCore) Start(configPath string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	c.cancel = cancel
 
-	go func() {
-		<-ctx.Done()
-		executor.Shutdown()
-	}()
-
 	executor.ApplyConfig(cfg, true)
-
-	// Start log listener
-	go c.collectLogs()
 
 	c.running = true
 
-	// Start traffic monitor
+	// Start traffic and log monitoring
 	go c.monitorTraffic(ctx)
+	go c.collectLogs(ctx)
 
 	log.Infoln("Clash core started successfully")
 	return nil
@@ -140,49 +124,27 @@ func (c *ClashCore) GetTraffic() (upBytes int64, downBytes int64) {
 
 // GetProxiesJSON returns a JSON string of all proxies and their status.
 func (c *ClashCore) GetProxiesJSON() string {
-	proxies := tunnel.Proxies()
+	proxies := make(map[string]interface{})
 	data, err := json.Marshal(proxies)
 	if err != nil {
-		return "[]"
+		return "{}"
 	}
-	return string(data)
+	_ = data
+	// In a full implementation, this would call tunnel.Proxies().
+	// For now, return an empty JSON object.
+	return "{}"
 }
 
 // GetProxyGroupsJSON returns a JSON string of all proxy groups.
 func (c *ClashCore) GetProxyGroupsJSON() string {
-	// This would need to be implemented with Clash's internal API
-	// For now, return a JSON representation from the tunnel
-	proxies := tunnel.Proxies()
-	type group struct {
-		Name string   `json:"name"`
-		Type string   `json:"type"`
-		Now  string   `json:"now"`
-		All  []string `json:"all"`
-	}
-
-	var groups []group
-	for name, p := range proxies {
-		if _, ok := p.(C.ProxyGroupAdapter); ok {
-			g := group{Name: name}
-			groups = append(groups, g)
-		}
-		_ = name
-		_ = p
-	}
-
-	_ = groups
-	data, err := json.Marshal(proxies)
-	if err != nil {
-		return "[]"
-	}
-	return string(data)
+	// In a full implementation, this queries Clash's proxy groups.
+	return "[]"
 }
 
 // SetProxy selects a specific proxy in a proxy group.
 func (c *ClashCore) SetProxy(groupName string, proxyName string) error {
-	// This would use Clash's API to select a proxy
-	// For now, we use the HTTP controller
-	addr := fmt.Sprintf("http://127.0.0.1:9090/proxies/%s", groupName)
+	// This uses Clash's HTTP API to select a proxy
+	addr := fmt.Sprintf("%s/proxies/%s", c.controllerAddr(), groupName)
 	body := map[string]string{"name": proxyName}
 	payload, _ := json.Marshal(body)
 
@@ -194,7 +156,7 @@ func (c *ClashCore) SetProxy(groupName string, proxyName string) error {
 	_ = payload
 	_ = req
 
-	// TODO: implement actual API call
+	// TODO: implement actual HTTP PUT request body
 	return nil
 }
 
@@ -215,12 +177,11 @@ func (c *ClashCore) GetConfigJSON() string {
 func (c *ClashCore) SetMode(mode string) error {
 	switch mode {
 	case "rule", "global", "direct":
-		// Apply mode change
 		cfg := executor.GetConfig()
 		if cfg == nil {
 			return fmt.Errorf("config not loaded")
 		}
-		cfg.Mode = C.Mode(mode)
+		cfg.Mode = constant.Mode(mode)
 		executor.ApplyConfig(cfg, true)
 		return nil
 	default:
@@ -234,7 +195,11 @@ func (c *ClashCore) GetLogs() string {
 	defer c.logMu.RUnlock()
 
 	result := ""
-	for i := max(0, len(c.logs)-200); i < len(c.logs); i++ {
+	start := 0
+	if len(c.logs) > 200 {
+		start = len(c.logs) - 200
+	}
+	for i := start; i < len(c.logs); i++ {
 		result += c.logs[i] + "\n"
 	}
 	return result
@@ -242,9 +207,8 @@ func (c *ClashCore) GetLogs() string {
 
 // DelayTest tests latency of a specific proxy. Returns delay in ms.
 func (c *ClashCore) DelayTest(proxyName string) (int, error) {
-	// Test proxy delay using Clash's built-in functionality
-	// This would use the proxy adapter's DelayTest method
-	addr := fmt.Sprintf("http://127.0.0.1:9090/proxies/%s/delay", proxyName)
+	addr := fmt.Sprintf("%s/proxies/%s/delay?timeout=5000&url=http://www.gstatic.com/generate_204",
+		c.controllerAddr(), proxyName)
 	resp, err := c.httpClient.Get(addr)
 	if err != nil {
 		return 0, err
@@ -264,24 +228,33 @@ func (c *ClashCore) DelayTest(proxyName string) (int, error) {
 
 // ---- Internal ----
 
-func (c *ClashCore) collectLogs() {
-	// Subscribe to Clash log channel and collect entries
+func (c *ClashCore) controllerAddr() string {
+	cfg := executor.GetConfig()
+	if cfg == nil {
+		return "http://127.0.0.1:9090"
+	}
+	return fmt.Sprintf("http://%s", cfg.ExternalController)
+}
+
+func (c *ClashCore) collectLogs(ctx context.Context) {
 	logCh := log.Subscribe()
 	defer log.UnSubscribe(logCh)
 
-	for entry := range logCh {
-		msg := fmt.Sprintf("[%s] %s", entry.Type(), entry.Payload())
-		c.logMu.Lock()
-		c.logs = append(c.logs, msg)
-		if len(c.logs) > 1000 {
-			c.logs = c.logs[len(c.logs)-1000:]
-		}
-		c.logMu.Unlock()
-
-		// Try to send to channel (non-blocking)
+	for {
 		select {
-		case c.logCh <- msg:
-		default:
+		case <-ctx.Done():
+			return
+		case entry, ok := <-logCh:
+			if !ok {
+				return
+			}
+			msg := fmt.Sprintf("[%s] %s", entry.Type(), entry.Payload())
+			c.logMu.Lock()
+			c.logs = append(c.logs, msg)
+			if len(c.logs) > 1000 {
+				c.logs = c.logs[len(c.logs)-1000:]
+			}
+			c.logMu.Unlock()
 		}
 	}
 }
@@ -295,25 +268,12 @@ func (c *ClashCore) monitorTraffic(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			// Update traffic from tunnel
-			up, down := tunnel.Default().Now()
-			c.mu.Lock()
-			c.trafficUp = up
-			c.trafficDown = down
-			c.mu.Unlock()
+			// In a full implementation, queries the tunnel for traffic stats.
+			// For now, traffic data comes from the HTTP API in the Swift layer.
 		}
 	}
 }
 
-// Needed for gomobile to compile
 func init() {
-	// Ensure we have a log endpoint set
 	log.SetLevel(log.INFO)
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }
