@@ -34,7 +34,7 @@ struct DashboardView: View {
                 }
             }
         }
-        .onChange(of: vpnManager.isConnected) { _, connected in
+        .onChange(of: vpnManager.isConnected) { connected in
             if connected {
                 trafficMonitor.startMonitoring()
             } else {

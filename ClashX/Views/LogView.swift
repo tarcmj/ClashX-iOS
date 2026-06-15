@@ -34,7 +34,7 @@ struct LogView: View {
                         }
                     }
                 }
-                .onChange(of: logs.count) { _, _ in
+                .onChange(of: logs.count) { _ in
                     if isAutoScroll, let lastLog = filteredLogs.last {
                         withAnimation(.none) {
                             proxy.scrollTo(lastLog, anchor: .bottom)

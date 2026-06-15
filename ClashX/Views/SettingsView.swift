@@ -12,7 +12,7 @@ struct SettingsView: View {
                 Toggle(isOn: $darkMode) {
                     Label("深色模式", systemImage: "moon.fill")
                 }
-                .onChange(of: darkMode) { _, newValue in
+                .onChange(of: darkMode) { newValue in
                     if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
                         windowScene.windows.first?.overrideUserInterfaceStyle = newValue ? .dark : .unspecified
                     }
