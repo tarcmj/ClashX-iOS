@@ -63,7 +63,8 @@ jobs:
         run: |
           # Pin to v2.41.0 for Xcode 15 compatibility
           curl -L -o /tmp/xcodegen.zip "https://github.com/yonaskolb/XcodeGen/releases/download/2.41.0/xcodegen.zip"
-          sudo unzip -o /tmp/xcodegen.zip -d /usr/local/bin/ 2>/dev/null
+          sudo unzip -o /tmp/xcodegen.zip -d /tmp/xcodegen_extracted/ 2>/dev/null
+          sudo cp /tmp/xcodegen_extracted/xcodegen/bin/xcodegen /usr/local/bin/xcodegen
           chmod +x /usr/local/bin/xcodegen
           xcodegen --version
 
