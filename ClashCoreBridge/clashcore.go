@@ -115,11 +115,18 @@ func (c *ClashCore) GetVersion() string {
 	return constant.Version
 }
 
-// GetTraffic returns the total uploaded and downloaded bytes since start.
-func (c *ClashCore) GetTraffic() (upBytes int64, downBytes int64) {
+// GetUploadTraffic returns the total uploaded bytes since start.
+func (c *ClashCore) GetUploadTraffic() int64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.trafficUp, c.trafficDown
+	return c.trafficUp
+}
+
+// GetDownloadTraffic returns the total downloaded bytes since start.
+func (c *ClashCore) GetDownloadTraffic() int64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.trafficDown
 }
 
 // GetProxiesJSON returns a JSON string of all proxies and their status.
