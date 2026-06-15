@@ -29,6 +29,7 @@ targets:
         type: group
     settings:
       base:
+        PRODUCT_NAME: ClashX
         PRODUCT_BUNDLE_IDENTIFIER: com.clashx.ios
         INFOPLIST_FILE: Configuration/Info.plist
         CODE_SIGN_STYLE: Automatic
@@ -59,6 +60,7 @@ targets:
         type: group
     settings:
       base:
+        PRODUCT_NAME: ClashXTunnel
         PRODUCT_BUNDLE_IDENTIFIER: com.clashx.ios.tunnel
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: ""
